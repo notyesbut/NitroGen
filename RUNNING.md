@@ -35,6 +35,8 @@ Supported variables:
 - `NG_PORT`: inference server port.
 - `NG_PROCESS`: game executable name (e.g. `Game.exe`).
 - `NG_CONTROLLER`: `gamepad` or `km`.
+- `NG_KM_KEYS`: comma/space-separated key list for KM actions (overrides defaults).
+- `NG_KM_MOUSE_BUTTONS`: comma/space-separated mouse buttons (left,right,middle,x1,x2).
 - `NG_KM_MOUSE_SENS`: mouse sensitivity (pixels per step) for the gamepad->KM adapter.
 - `NG_KM_DEADZONE`: deadzone for stick -> WASD mapping (default `0.2`).
 - `NG_KM_MOUSE_MAX`: max mouse delta per step (default `50`).
@@ -52,3 +54,29 @@ Supported variables:
 ## KM adapter notes
 
 The current model outputs gamepad actions. For KM control, `play.py` maps gamepad actions to keyboard/mouse (WASD + mouse) so it can run immediately. For best results, collect KM demonstrations and train a KM action head.
+
+## KM recording
+
+Record KM actions + frames for training:
+
+```bash
+python scripts/record_km.py --process Game.exe --fps 30
+```
+
+Outputs:
+- `out/record_km/<run_id>/frames/*.png`
+- `out/record_km/<run_id>/actions.jsonl`
+- `out/record_km/<run_id>/meta.json`
+
+Use `--keys` / `--mouse-buttons` (or `NG_KM_KEYS` / `NG_KM_MOUSE_BUTTONS`) to control which inputs are tracked.
+Mouse wheel is currently recorded as `0` (no wheel hook).
+
+Recording env vars:
+- `NG_RECORD_FPS`: capture FPS.
+- `NG_RECORD_MAX_FRAMES`: cap frames (0 = unlimited).
+- `NG_RECORD_DURATION`: cap seconds (0 = unlimited).
+- `NG_IMAGE_WIDTH` / `NG_IMAGE_HEIGHT`: recorded frame size.
+- `NG_RECORD_RAW_MOUSE`: enable raw input mouse deltas + wheel (default on).
+
+Flags:
+- `--raw-mouse` / `--no-raw-mouse`: toggle raw input mouse capture.

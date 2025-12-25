@@ -1,68 +1,79 @@
-<img src="assets/github_banner.gif" width="100%" />
+# NitroGen (Safe KM Runtime)
 
-<div align="center">
-  <p style="font-size: 1.2em;">
-    <a href="https://nitrogen.minedojo.org/"><strong>Website</strong></a> | 
-    <a href="https://huggingface.co/nvidia/NitroGen"><strong>Model</strong></a> |
-    <a href="https://huggingface.co/datasets/nvidia/NitroGen"><strong>Dataset</strong></a> |
-    <a href="https://nitrogen.minedojo.org/assets/documents/nitrogen.pdf"><strong>Paper</strong></a>
-  </p>
-</div>
+NitroGen is a VLM-based game agent. This fork focuses on Windows stability, safe-by-default input, and keyboard+mouse (KM) control with an adapter so existing gamepad-trained models can run immediately.
 
+## What this adds
 
-# NitroGen
+- Safe-by-default runtime (no speedhack, no process injection)
+- Keyboard+mouse controller via Win32 SendInput
+- Gamepad->KM adapter so current checkpoints run without retraining
+- Raw-input KM recording pipeline for future KM training
+- Dry-run mode, rate-limited input, and STOP-file kill switch
 
-NitroGen is an open foundation model for generalist gaming agents. This multi-game model takes pixel input and predicts gamepad actions.
+## Requirements
 
-NitroGen is trained through behavior cloning on the largest video-action gameplay dataset, assembled exclusively from internet videos. It can be adapted via post-training to unseen games.
+- Windows 10/11
+- Python 3.10
+- Your game installed locally (this repo does not ship games)
+- CUDA-capable GPU recommended for inference server
 
-# Installation
+## Install
 
-## Prerequisites
-
-We **do not distribute game environments**, you must use your own copies of the games. This repository only supports running the agent on **Windows games**. You can serve the model from a Linux machine for inference, but the game ultimately has to run on Windows. We have tested on Windows 11 with Python ≥ 3.12.
-
-## Setup
-
-Install this repo:
 ```bash
-git clone https://github.com/MineDojo/NitroGen.git
-cd NitroGen
-pip install -e .
+py -3.10 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -U pip setuptools wheel
+
+pip install -e .[serve]
+pip install -e .[play]
 ```
 
-Download NitroGen checkpoint from [HuggingFace](https://huggingface.co/nvidia/NitroGen):
+## .env example
+
 ```bash
-hf download nvidia/NitroGen ng.pt
+NG_PT=C:\path\to\ng.pt
+NG_PORT=5555
+NG_PROCESS=Game.exe
+NG_CONTROLLER=km
+NG_KM_MOUSE_SENS=15
 ```
 
-# Getting Started
+## Run
 
-First, start an inference server for the model:
+Start the model server:
+
 ```bash
-python scripts/serve.py <path_to_ng.pt>  
+python scripts/serve.py
 ```
 
-Then, run the agent on the game of your choice:
+Run the agent:
+
 ```bash
-python scripts/play.py --process '<game_executable_name>.exe'
+python scripts/play.py --controller km
 ```
 
-The `--process` parameter must be the exact executable name of the game you want to play. You can find it by right-clicking on the game process in Windows Task Manager (Ctrl+Shift+Esc), and selecting `Properties`. The process name should be in the `General` tab and end with `.exe`.
+The model outputs gamepad actions. In KM mode, actions are mapped to WASD + mouse to provide immediate control. For best results, record KM demos and train a KM action head.
 
-See `RUNNING.md` for .env usage, KM controller mode, and safety notes.
+## Record KM demonstrations
 
-<!-- TODO # Paper and Citation
+```bash
+python scripts/record_km.py --process Game.exe --fps 30
+```
 
-If you find our work useful, please consider citing us!
+Outputs:
+- `out/record_km/<run_id>/frames/*.png`
+- `out/record_km/<run_id>/actions.jsonl`
+- `out/record_km/<run_id>/meta.json`
 
-```bibtex
-@article{,
-  title   = {},
-  author  = {},
-  year    = {},
-  journal = {}
-}
-``` -->
+Raw input mouse capture is enabled by default; use `--no-raw-mouse` if you need to fall back to cursor deltas.
 
-**Disclaimer**: This project is strictly for research purposes and is not an official NVIDIA product.
+## Safety notes
+
+- Safe mode is default: no xspeedhack import and no process injection.
+- Enable speedhack only if you accept the risks: `NG_ENABLE_SPEEDHACK=1`.
+- Use `NG_DISABLE_INPUT=1` for dry-run (no input sent).
+- Create a STOP file to break the loop immediately (default: `PATH_REPO/STOP`).
+
+## Configuration
+
+See `RUNNING.md` for full env var and CLI options.

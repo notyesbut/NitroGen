@@ -198,7 +198,22 @@ class GameEnv(Env):
                 self.controller_kind = "gamepad"
             elif controller_norm in {"km", "keyboard", "keyboard_mouse"}:
                 from nitrogen.input.keyboard_mouse import KeyboardMouseController
-                self.controller = KeyboardMouseController(dry_run=self.disable_input)
+                from nitrogen.input.keymap import (
+                    DEFAULT_KM_KEYS,
+                    DEFAULT_MOUSE_BUTTONS,
+                    parse_key_list,
+                    parse_mouse_button_list,
+                )
+                self.km_key_list = parse_key_list(os.getenv("NG_KM_KEYS"), DEFAULT_KM_KEYS)
+                self.km_mouse_buttons = parse_mouse_button_list(
+                    os.getenv("NG_KM_MOUSE_BUTTONS"),
+                    DEFAULT_MOUSE_BUTTONS,
+                )
+                self.controller = KeyboardMouseController(
+                    dry_run=self.disable_input,
+                    key_list=self.km_key_list,
+                    mouse_buttons=self.km_mouse_buttons,
+                )
                 self.controller_kind = "km"
             else:
                 raise ValueError(f"Unsupported controller type: {controller}")
@@ -258,14 +273,27 @@ class GameEnv(Env):
 
     def _build_action_space(self) -> Dict:
         if self.controller_kind == "km":
-            from nitrogen.input.keyboard_mouse import DEFAULT_KEYS, DEFAULT_MOUSE_BUTTONS
+            from nitrogen.input.keymap import (
+                DEFAULT_KM_KEYS,
+                DEFAULT_MOUSE_BUTTONS,
+                parse_key_list,
+                parse_mouse_button_list,
+            )
             mouse_limit = int(os.getenv("NG_KM_MOUSE_MAX", "50"))
+            key_list = getattr(self, "km_key_list", None) or parse_key_list(
+                os.getenv("NG_KM_KEYS"),
+                DEFAULT_KM_KEYS,
+            )
+            mouse_buttons = getattr(self, "km_mouse_buttons", None) or parse_mouse_button_list(
+                os.getenv("NG_KM_MOUSE_BUTTONS"),
+                DEFAULT_MOUSE_BUTTONS,
+            )
             return Dict(
                 {
-                    "keys": MultiBinary(len(DEFAULT_KEYS)),
+                    "keys": MultiBinary(len(key_list)),
                     "mouse_dx": Box(low=-mouse_limit, high=mouse_limit, shape=(1,), dtype=np.int16),
                     "mouse_dy": Box(low=-mouse_limit, high=mouse_limit, shape=(1,), dtype=np.int16),
-                    "mouse_buttons": MultiBinary(len(DEFAULT_MOUSE_BUTTONS)),
+                    "mouse_buttons": MultiBinary(len(mouse_buttons)),
                     "mouse_wheel": Box(low=-1200, high=1200, shape=(1,), dtype=np.int16),
                 }
             )

@@ -3,6 +3,13 @@ from __future__ import annotations
 from typing import Any, Mapping, Set
 
 from nitrogen.input.base import InputController
+from nitrogen.input.keymap import (
+    EXTENDED_KEYS,
+    MOUSE_BUTTON_FLAGS,
+    VK_CODE,
+    normalize_key,
+    normalize_mouse_button,
+)
 
 try:
     import ctypes
@@ -19,91 +26,6 @@ try:
 except Exception:  # pragma: no cover - optional fallback
     pyautogui = None
 
-
-DEFAULT_KEYS = (
-    "w", "a", "s", "d",
-    "space", "shift", "ctrl",
-    "e", "q", "r",
-    "tab", "esc",
-    "up", "down", "left", "right",
-    "c", "v",
-)
-
-DEFAULT_MOUSE_BUTTONS = ("left", "right", "middle")
-
-VK_CODE = {
-    "backspace": 0x08,
-    "tab": 0x09,
-    "enter": 0x0D,
-    "shift": 0x10,
-    "ctrl": 0x11,
-    "alt": 0x12,
-    "pause": 0x13,
-    "capslock": 0x14,
-    "esc": 0x1B,
-    "space": 0x20,
-    "pageup": 0x21,
-    "pagedown": 0x22,
-    "end": 0x23,
-    "home": 0x24,
-    "left": 0x25,
-    "up": 0x26,
-    "right": 0x27,
-    "down": 0x28,
-    "insert": 0x2D,
-    "delete": 0x2E,
-    "0": 0x30,
-    "1": 0x31,
-    "2": 0x32,
-    "3": 0x33,
-    "4": 0x34,
-    "5": 0x35,
-    "6": 0x36,
-    "7": 0x37,
-    "8": 0x38,
-    "9": 0x39,
-    "a": 0x41,
-    "b": 0x42,
-    "c": 0x43,
-    "d": 0x44,
-    "e": 0x45,
-    "f": 0x46,
-    "g": 0x47,
-    "h": 0x48,
-    "i": 0x49,
-    "j": 0x4A,
-    "k": 0x4B,
-    "l": 0x4C,
-    "m": 0x4D,
-    "n": 0x4E,
-    "o": 0x4F,
-    "p": 0x50,
-    "q": 0x51,
-    "r": 0x52,
-    "s": 0x53,
-    "t": 0x54,
-    "u": 0x55,
-    "v": 0x56,
-    "w": 0x57,
-    "x": 0x58,
-    "y": 0x59,
-    "z": 0x5A,
-}
-
-EXTENDED_KEYS = {
-    "up", "down", "left", "right",
-    "insert", "delete", "home", "end", "pageup", "pagedown",
-}
-
-MOUSE_BUTTON_FLAGS = {
-    "left": (0x0002, 0x0004),
-    "right": (0x0008, 0x0010),
-    "middle": (0x0020, 0x0040),
-}
-
-
-def _normalize_key(key: str) -> str:
-    return key.strip().lower()
 
 
 def _value_from_action(value: Any) -> int:
@@ -172,11 +94,23 @@ def _send_input(*inputs: "INPUT") -> None:
 
 
 class KeyboardMouseController(InputController):
-    def __init__(self, dry_run: bool = False, backend: str = "sendinput") -> None:
+    def __init__(
+        self,
+        dry_run: bool = False,
+        backend: str = "sendinput",
+        key_list: list[str] | None = None,
+        mouse_buttons: list[str] | None = None,
+    ) -> None:
         super().__init__(dry_run=dry_run)
         self.backend = backend
         self.pressed_keys: Set[str] = set()
         self.pressed_mouse_buttons: Set[str] = set()
+        self.key_list = [normalize_key(k) for k in key_list] if key_list else None
+        if self.key_list:
+            self.key_list = [k for k in self.key_list if k in VK_CODE]
+        self.mouse_button_list = [normalize_mouse_button(b) for b in mouse_buttons] if mouse_buttons else None
+        if self.mouse_button_list:
+            self.mouse_button_list = [b for b in self.mouse_button_list if b in MOUSE_BUTTON_FLAGS]
 
         if self.backend == "sendinput" and not _SENDINPUT_AVAILABLE:
             self.backend = "pyautogui"
@@ -229,11 +163,15 @@ class KeyboardMouseController(InputController):
             keys = set(raw)
         else:
             keys = set()
+        if self.key_list and not isinstance(raw, Mapping):
+            vector_keys = self._vector_to_names(raw, self.key_list)
+            if vector_keys is not None:
+                return vector_keys
         normalized = set()
         for key in keys:
             if not isinstance(key, str):
                 continue
-            name = _normalize_key(key)
+            name = normalize_key(key)
             if name in VK_CODE:
                 normalized.add(name)
         return normalized
@@ -245,14 +183,33 @@ class KeyboardMouseController(InputController):
             buttons = set(raw)
         else:
             buttons = set()
+        if self.mouse_button_list and not isinstance(raw, Mapping):
+            vector_buttons = self._vector_to_names(raw, self.mouse_button_list)
+            if vector_buttons is not None:
+                return vector_buttons
         normalized = set()
         for button in buttons:
             if not isinstance(button, str):
                 continue
-            name = button.strip().lower()
+            name = normalize_mouse_button(button)
             if name in MOUSE_BUTTON_FLAGS:
                 normalized.add(name)
         return normalized
+
+    @staticmethod
+    def _vector_to_names(raw: Any, names: list[str]) -> Set[str] | None:
+        if not hasattr(raw, "__len__"):
+            return None
+        try:
+            if len(raw) != len(names):
+                return None
+            selected = set()
+            for name, value in zip(names, raw):
+                if float(value) > 0:
+                    selected.add(name)
+            return selected
+        except Exception:
+            return None
 
     def _key_event(self, key: str, is_down: bool) -> None:
         if self.backend == "pyautogui":
@@ -282,14 +239,16 @@ class KeyboardMouseController(InputController):
 
     def _mouse_button_event(self, button: str, is_down: bool) -> None:
         if self.backend == "pyautogui":
+            if button not in {"left", "right", "middle"}:
+                return
             if is_down:
                 pyautogui.mouseDown(button=button)
             else:
                 pyautogui.mouseUp(button=button)
             return
-        down_flag, up_flag = MOUSE_BUTTON_FLAGS[button]
+        down_flag, up_flag, data = MOUSE_BUTTON_FLAGS[button]
         flag = down_flag if is_down else up_flag
-        mi = MOUSEINPUT(dx=0, dy=0, mouseData=0, dwFlags=flag, time=0, dwExtraInfo=0)
+        mi = MOUSEINPUT(dx=0, dy=0, mouseData=data, dwFlags=flag, time=0, dwExtraInfo=0)
         _send_input(INPUT(type=INPUT_MOUSE, mi=mi))
 
     def _mouse_wheel(self, amount: int) -> None:
