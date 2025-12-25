@@ -35,6 +35,7 @@ Supported variables:
 - `NG_PORT`: inference server port.
 - `NG_PROCESS`: game executable name (e.g. `Game.exe`).
 - `NG_CONTROLLER`: `gamepad` or `km`.
+- `NG_PICK_PROCESS`: set to `1` to open the process selection menu at startup.
 - `NG_KM_KEYS`: comma/space-separated key list for KM actions (overrides defaults).
 - `NG_KM_MOUSE_BUTTONS`: comma/space-separated mouse buttons (left,right,middle,x1,x2).
 - `NG_KM_MOUSE_SENS`: mouse sensitivity (pixels per step) for the gamepad->KM adapter.
@@ -77,6 +78,14 @@ Recording env vars:
 - `NG_RECORD_DURATION`: cap seconds (0 = unlimited).
 - `NG_IMAGE_WIDTH` / `NG_IMAGE_HEIGHT`: recorded frame size.
 - `NG_RECORD_RAW_MOUSE`: enable raw input mouse deltas + wheel (default on).
+- `NG_RECORD_RAW_FOCUS_ONLY`: only record raw mouse while game window is focused (default on).
 
 Flags:
 - `--raw-mouse` / `--no-raw-mouse`: toggle raw input mouse capture.
+- `--raw-focus-only` / `--raw-allow-background`: toggle focus-only raw capture.
+
+Process picker:
+- `--pick-process`: open the process selection menu (works in `play.py` and `record_km.py`).
+You can also enter a specific PID as `pid:1234` or type part of a process name/window title to auto-match.
+Menu commands: `all` toggles all/windowed, `/text` filters list, `/clear` resets filter, `r` refreshes.
+If the chosen process has no visible window, you'll be prompted to pick again.

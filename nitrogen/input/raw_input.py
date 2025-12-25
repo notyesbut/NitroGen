@@ -102,13 +102,21 @@ class MSG(ctypes.Structure):
 
 
 class RawMouseHook:
-    def __init__(self, capture_background: bool = True) -> None:
+    def __init__(
+        self,
+        capture_background: bool = True,
+        require_focus: bool = False,
+        focus_pid: int | None = None,
+    ) -> None:
         self.capture_background = capture_background
+        self.require_focus = require_focus
+        self.focus_pid = focus_pid
         self._lock = threading.Lock()
         self._dx = 0
         self._dy = 0
         self._wheel = 0
         self._last_abs = None
+        self._focused_last = True
         self._thread = None
         self._thread_id = None
         self._ready = threading.Event()
@@ -136,6 +144,13 @@ class RawMouseHook:
         self._thread = None
 
     def poll(self) -> tuple[int, int, int]:
+        if self.require_focus and not self._is_focused():
+            with self._lock:
+                self._dx = 0
+                self._dy = 0
+                self._wheel = 0
+                self._last_abs = None
+            return 0, 0, 0
         with self._lock:
             dx = self._dx
             dy = self._dy
@@ -196,6 +211,8 @@ class RawMouseHook:
             self._handle_raw_input(lparam)
             return 0
         if msg == WM_MOUSEWHEEL:
+            if self.require_focus and not self._is_focused():
+                return 0
             delta = ctypes.c_short((wparam >> 16) & 0xFFFF).value
             with self._lock:
                 self._wheel += int(delta)
@@ -209,6 +226,16 @@ class RawMouseHook:
         return _user32.DefWindowProcW(hwnd, msg, wparam, lparam)
 
     def _handle_raw_input(self, h_raw_input) -> None:
+        if self.require_focus:
+            focused = self._is_focused()
+            if not focused:
+                self._focused_last = False
+                self._last_abs = None
+                return
+            if not self._focused_last:
+                self._last_abs = None
+            self._focused_last = True
+
         size = wintypes.UINT(0)
         if _user32.GetRawInputData(
             h_raw_input,
@@ -254,3 +281,15 @@ class RawMouseHook:
             self._dx += dx
             self._dy += dy
             self._wheel += int(wheel)
+
+    def _is_focused(self) -> bool:
+        if not self.require_focus:
+            return True
+        if self.focus_pid is None:
+            return True
+        hwnd = _user32.GetForegroundWindow()
+        if not hwnd:
+            return False
+        pid = wintypes.DWORD(0)
+        _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        return pid.value == self.focus_pid

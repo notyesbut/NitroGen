@@ -24,6 +24,7 @@ from nitrogen.input.keymap import (
 )
 from nitrogen.input.keyboard_mouse_state import KeyboardMouseState
 from nitrogen.input.raw_input import RawMouseHook
+from nitrogen.process_picker import choose_process_name, process_exists, process_has_window
 
 
 def load_dotenv_if_available() -> None:
@@ -58,6 +59,12 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=os.getenv("NG_PROCESS", "celeste.exe"),
         help="Game executable name (default: NG_PROCESS or celeste.exe)",
+    )
+    parser.add_argument(
+        "--pick-process",
+        action="store_true",
+        default=env_flag("NG_PICK_PROCESS", False),
+        help="Open a process selection menu at startup.",
     )
     parser.add_argument(
         "--fps",
@@ -134,6 +141,21 @@ def parse_args() -> argparse.Namespace:
         help="Disable raw input (uses cursor deltas).",
     )
     parser.set_defaults(raw_mouse=env_flag("NG_RECORD_RAW_MOUSE", True))
+
+    focus_group = parser.add_mutually_exclusive_group()
+    focus_group.add_argument(
+        "--raw-focus-only",
+        dest="raw_focus_only",
+        action="store_true",
+        help="Record raw mouse only while the game window is focused.",
+    )
+    focus_group.add_argument(
+        "--raw-allow-background",
+        dest="raw_focus_only",
+        action="store_false",
+        help="Allow raw mouse capture even when the game window is not focused.",
+    )
+    parser.set_defaults(raw_focus_only=env_flag("NG_RECORD_RAW_FOCUS_ONLY", True))
     parser.add_argument(
         "--no-png",
         action="store_true",
@@ -168,6 +190,15 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+
+    process_ok = process_exists(args.process)
+    process_ready = process_has_window(args.process)
+    if args.pick_process or not process_ready:
+        if not process_ok:
+            print(f"Process not found: {args.process}")
+        elif not process_ready:
+            print(f"Process has no visible window yet: {args.process}")
+        args.process = choose_process_name(default_name=args.process)
 
     key_list = parse_key_list(args.keys, DEFAULT_KM_KEYS)
     mouse_buttons = parse_mouse_button_list(args.mouse_buttons, DEFAULT_MOUSE_BUTTONS)
@@ -207,6 +238,7 @@ def main() -> int:
         "screenshot_backend": args.screenshot_backend,
         "frames_saved": not args.no_png,
         "raw_mouse": bool(args.raw_mouse),
+        "raw_focus_only": bool(args.raw_focus_only),
         "created_at": time.time(),
     }
     meta_path.write_text(json.dumps(meta, indent=2))
@@ -214,7 +246,11 @@ def main() -> int:
     raw_mouse = None
     if args.raw_mouse:
         try:
-            raw_mouse = RawMouseHook(capture_background=True)
+            raw_mouse = RawMouseHook(
+                capture_background=True,
+                require_focus=bool(args.raw_focus_only),
+                focus_pid=env.game_pid,
+            )
             raw_mouse.start()
         except Exception as exc:
             print(f"Raw mouse input unavailable, falling back to cursor deltas: {exc}")

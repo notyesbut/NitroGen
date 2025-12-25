@@ -54,6 +54,8 @@ python scripts/play.py --controller km
 
 The model outputs gamepad actions. In KM mode, actions are mapped to WASD + mouse to provide immediate control. For best results, record KM demos and train a KM action head.
 
+If you do not know the exact process name, use `--pick-process` to select from active windows.
+
 ## Record KM demonstrations
 
 ```bash

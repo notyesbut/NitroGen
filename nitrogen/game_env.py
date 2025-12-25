@@ -13,6 +13,7 @@ from gymnasium.spaces import Box, Dict, Discrete, MultiBinary
 from PIL import Image
 
 from nitrogen.input.base import InputController
+from nitrogen.process_picker import parse_process_spec, process_name_matches
 
 assert platform.system().lower() == "windows", "This module is only supported on Windows."
 
@@ -29,6 +30,45 @@ def _env_flag(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _select_window_name(windows: list[dict]) -> str | None:
+    window_name = None
+    if windows:
+        if len(windows) > 1:
+            print(f"Multiple windows found: {[win['title'] for win in windows]}")
+            print("Using heuristics to select the correct window...")
+        proxy_keywords = ["d3dproxywindow", "proxy", "helper", "overlay"]
+        for win in windows:
+            if not any(keyword in win["title"].lower() for keyword in proxy_keywords):
+                window_name = win["title"]
+                break
+        if window_name is None and windows:
+            window_name = windows[0]["title"]
+    return window_name
+
+
+def _windows_for_pid(pid: int) -> list[dict]:
+    windows: list[dict] = []
+
+    def enum_window_callback(hwnd, pid_to_find):
+        _, found_pid = win32process.GetWindowThreadProcessId(hwnd)
+        if found_pid == pid_to_find:
+            window_text = win32gui.GetWindowText(hwnd)
+            if window_text and win32gui.IsWindowVisible(hwnd):
+                windows.append({
+                    "hwnd": hwnd,
+                    "title": window_text,
+                    "visible": win32gui.IsWindowVisible(hwnd),
+                })
+        return True
+
+    try:
+        win32gui.EnumWindows(enum_window_callback, pid)
+    except Exception:
+        pass
+
+    return windows
+
+
 def get_process_info(process_name: str) -> dict:
     """
     Get process information for a given process name on Windows.
@@ -42,9 +82,38 @@ def get_process_info(process_name: str) -> dict:
     """
     results = []
 
+    pid_override, normalized_name = parse_process_spec(process_name)
+    if pid_override is not None:
+        try:
+            proc = psutil.Process(pid_override)
+        except Exception as exc:
+            raise ValueError(f"No process found with pid: {pid_override}") from exc
+
+        architecture = "unknown"
+        try:
+            process_handle = win32api.OpenProcess(
+                win32con.PROCESS_QUERY_INFORMATION,
+                False,
+                pid_override,
+            )
+            is_wow64 = win32process.IsWow64Process(process_handle)
+            win32api.CloseHandle(process_handle)
+            architecture = "x86" if is_wow64 else "x64"
+        except Exception:
+            architecture = "unknown"
+
+        windows = _windows_for_pid(pid_override)
+        window_name = _select_window_name(windows)
+
+        return {
+            "pid": pid_override,
+            "window_name": window_name,
+            "architecture": architecture,
+        }
+
     for proc in psutil.process_iter(["pid", "name"]):
         try:
-            if proc.info["name"].lower() == process_name.lower():
+            if proc.info["name"] and process_name_matches(normalized_name, proc.info["name"]):
                 pid = proc.info["pid"]
 
                 try:
@@ -59,42 +128,14 @@ def get_process_info(process_name: str) -> dict:
                 except Exception:
                     architecture = "unknown"
 
-                windows = []
-
-                def enum_window_callback(hwnd, pid_to_find):
-                    _, found_pid = win32process.GetWindowThreadProcessId(hwnd)
-                    if found_pid == pid_to_find:
-                        window_text = win32gui.GetWindowText(hwnd)
-                        if window_text and win32gui.IsWindowVisible(hwnd):
-                            windows.append({
-                                "hwnd": hwnd,
-                                "title": window_text,
-                                "visible": win32gui.IsWindowVisible(hwnd),
-                            })
-                    return True
-
-                try:
-                    win32gui.EnumWindows(enum_window_callback, pid)
-                except Exception:
-                    pass
-
-                window_name = None
-                if windows:
-                    if len(windows) > 1:
-                        print(f"Multiple windows found for PID {pid}: {[win['title'] for win in windows]}")
-                        print("Using heuristics to select the correct window...")
-                    proxy_keywords = ["d3dproxywindow", "proxy", "helper", "overlay"]
-                    for win in windows:
-                        if not any(keyword in win["title"].lower() for keyword in proxy_keywords):
-                            window_name = win["title"]
-                            break
-                    if window_name is None and windows:
-                        window_name = windows[0]["title"]
+                windows = _windows_for_pid(pid)
+                window_name = _select_window_name(windows)
 
                 results.append({
                     "pid": pid,
                     "window_name": window_name,
                     "architecture": architecture,
+                    "window_count": len(windows),
                 })
 
         except (psutil.NoSuchProcess, psutil.AccessDenied):
@@ -103,7 +144,18 @@ def get_process_info(process_name: str) -> dict:
     if len(results) == 0:
         raise ValueError(f"No process found with name: {process_name}")
     if len(results) > 1:
-        print(f"Warning: Multiple processes found with name '{process_name}'. Returning first match.")
+        with_windows = [r for r in results if r["window_name"]]
+        if with_windows:
+            with_windows.sort(key=lambda r: r.get("window_count", 0), reverse=True)
+            best = with_windows[0]
+        else:
+            best = results[0]
+        if best != results[0]:
+            print(
+                f"Warning: Multiple processes found with name '{process_name}'. "
+                f"Selecting PID {best['pid']} with a visible window."
+            )
+        return best
 
     return results[0]
 

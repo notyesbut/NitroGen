@@ -29,6 +29,7 @@ from PIL import Image
 
 from nitrogen.game_env import GameEnv
 from nitrogen.action_adapters.gamepad_to_km import gamepad_action_to_km
+from nitrogen.process_picker import choose_process_name, process_exists, process_has_window
 from nitrogen.shared import BUTTON_ACTION_TOKENS, PATH_REPO
 from nitrogen.inference_viz import create_viz, VideoRecorder
 from nitrogen.inference_client import ModelClient
@@ -310,6 +311,12 @@ def parse_args() -> argparse.Namespace:
         default=os.getenv("NG_PROCESS", "celeste.exe"),
         help="Exact game executable name (default: NG_PROCESS or celeste.exe)",
     )
+    parser.add_argument(
+        "--pick-process",
+        action="store_true",
+        default=env_flag("NG_PICK_PROCESS", False),
+        help="Open a process selection menu at startup.",
+    )
 
 
 def km_action_template() -> Dict[str, Any]:
@@ -466,6 +473,15 @@ def km_action_template() -> Dict[str, Any]:
 # -----------------------------
 def main() -> int:
     args = parse_args()
+
+    process_ok = process_exists(args.process)
+    process_ready = process_has_window(args.process)
+    if args.pick_process or not process_ready:
+        if not process_ok:
+            print(f"Process not found: {args.process}")
+        elif not process_ready:
+            print(f"Process has no visible window yet: {args.process}")
+        args.process = choose_process_name(default_name=args.process)
 
     # Connect to model server
     policy = ModelClient(port=args.port)
